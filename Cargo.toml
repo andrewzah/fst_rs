@@ -1,0 +1,10 @@
+[package]
+name = "fst_rs"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+hidapi = "2.4"
+rusqlite = { version = "0.30", features = ["bundled"] }
+tokio = { version = "1", features = ["full"]}
+udev = "0.8"

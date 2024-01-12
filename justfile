@@ -1,0 +1,2 @@
+b:
+  cargo build
