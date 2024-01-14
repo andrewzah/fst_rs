@@ -11,12 +11,12 @@ use tokio::{task, runtime::Runtime, sync::Mutex as TokioMutex};
 const DB_PATH: &str = "keystrokes.db";
 
 fn monitor_device(device: udev::Device) -> Result<(), Box<dyn Error>> {
-    println!("monitoring device...");
+    //println!("monitoring device...");
 
-    let vendor_id: u16 = device.property_value("ID_VENDOR_ID").ok_or("")?.into_inner().parse::<u16>();
-    let product_id = device.property_value("ID_USB_MODEL_ID").ok_or("")?;
+    //let vendor_id: u16 = device.property_value("ID_VENDOR_ID").ok_or("")?.into_inner().parse::<u16>();
+    //let product_id = device.property_value("ID_USB_MODEL_ID").ok_or("")?;
 
-    println!("vendor_id: {:?}", vendor_id);
+    //println!("vendor_id: {:?}", vendor_id);
 
     //let mut hid_device = HidApi::new()?.open(vendor_id, product_id)?;
 
@@ -50,19 +50,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     enumerator.match_property("ID_USB_MODEL_ID", "028e").unwrap();
     enumerator.match_attribute("power/control", "on").unwrap();
 
-    loop {
-        let mut i = 0;
-        for device in enumerator.scan_devices().unwrap() {
-            monitor_device(device);
-        }
-
-        thread::sleep(Duration::from_secs(1));
-        //std::process::exit(0);
+    let mut i = 0;
+    for device in enumerator.scan_devices().unwrap() {
+        monitor_device(device);
     }
 
-    let t2 = thread::spawn(move || {
-    });
-
+    //thread::sleep(Duration::from_secs(1));
+    //std::process::exit(0);
+    //
     // idVendor=045e, idProduct=028e
     //let threads = vec![t1, t2];
     //for thread in threads {
