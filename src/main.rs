@@ -167,10 +167,75 @@ fn udev_scan_devices() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn is_joystick_evdev(device: &evdev::Device) -> bool {
+    let input_id = device.input_id();
+    let vid = input_id.vendor();
+    let pid = input_id.product();
+
+    match (vid, pid) {
+        (0x045e, 0x028e) => true,
+        _ => false,
+    }
+}
+
+async fn evdev_test() -> Result<(), Box<dyn Error>> {
+    use evdev::{Device, Key};
+
+    let mut devices = evdev::enumerate()
+        .map(|t| t.1)
+        .filter(|d| is_joystick_evdev(d));
+
+    for device in devices {
+        println!("\n monitoring device: {}", device);
+
+        task::spawn(async move {
+            println!("starting up thread");
+            if let Err(err) = monitor_device_evdev(device).await {
+                println!("err while monitoring device: {}", err);
+            }
+        });
+    }
+
+    println!("ending evdev_test()");
+    Ok(())
+}
+
+async fn monitor_device_evdev(device: evdev::Device) -> Result<(), Box<dyn Error>> {
+    println!("here");
+    let mut events = device.into_event_stream()?;
+
+    let mut timestamps: Vec<(String,String)> = vec![];
+    let mut keypresses: HashMap<String, u64> = HashMap::new();
+
+    loop {
+        let ev = events.next_event().await?;
+        if ev.value() != 0 {
+            continue
+        }
+
+        let key = match ev.kind() {
+            evdev::InputEventKind::Key(a) => 0,
+            evdev::InputEventKind::AbsAxis(a) => 1,
+            _ => continue,
+        };
+
+        println!("{:?}", ev);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     //rusb_test();
     //udev_scan_devices();
+
+    match evdev_test().await {
+        Err(err) => println!("err: {}", err),
+        _ => {}
+    }
+
+    loop {
+        thread::sleep(Duration::from_secs(1));
+    }
 
     Ok(())
 }
