@@ -1,3 +1,7 @@
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, Mutex, mpsc::channel};
@@ -10,6 +14,44 @@ use tokio::{task, runtime::Runtime, sync::Mutex as TokioMutex};
 
 const DB_PATH: &str = "keystrokes.db";
 
+fn find_endpoint(config_desc: rusb::ConfigDescriptor) -> Option<u8> {
+    let mut result = None;
+
+    for iface in config_desc.interfaces() {
+        for iface_desc in iface.descriptors() {
+            println!("iface num: {}", iface_desc.interface_number());
+            println!("  iface num_endpoints: {}", iface_desc.num_endpoints());
+            println!("  iface num_endpoint_descs: {}", iface_desc.endpoint_descriptors().count());
+
+            for endpoint_desc in iface_desc.endpoint_descriptors() {
+                let dir = match endpoint_desc.direction() {
+                    rusb::Direction::In => "in",
+                    _ => "out",
+                };
+
+                let tt = match endpoint_desc.transfer_type() {
+                    rusb::TransferType::Control => "control",
+                    rusb::TransferType::Isochronous => "isochronous",
+                    rusb::TransferType::Bulk => "bulk",
+                    rusb::TransferType::Interrupt => "interrupt",
+                };
+
+                println!("endpoint: {}, {}", endpoint_desc.number(), endpoint_desc.address());
+                println!("  endpoint dir: {}", dir);
+                println!("  endpoint max packet size: {}", endpoint_desc.max_packet_size());
+                println!("  endpoint transfer type: {}", tt);
+
+                match endpoint_desc.direction() {
+                    rusb::Direction::In => result = Some(endpoint_desc.address()),
+                    _ => {},
+                };
+            }
+        }
+    }
+
+    result
+}
+
 fn monitor_device<T: UsbContext>(device: Device<T>) -> Result<(), Box<dyn Error>> {
     let device_desc = device.device_descriptor()?;
     let config_desc = device.active_config_descriptor()?;
@@ -20,17 +62,29 @@ fn monitor_device<T: UsbContext>(device: Device<T>) -> Result<(), Box<dyn Error>
         device_desc.vendor_id(),
         device_desc.product_id());
 
-    for iface in config_desc.interfaces() {
-        println!("{}", iface.number());
+    let endpoint = match find_endpoint(config_desc) {
+        Some(e) => e,
+        None => return Err("Unable to find an endpoint to listen on".into()),
+    };
+    println!("endpoint: {}", &endpoint);
 
-        for iface_desc in iface.descriptors() {
-            for endpoint_desc in iface_desc.endpoint_descriptors() {
-                println!("{:?}", endpoint_desc);
-            }
-        }
-    }
+    let mut handle = device.open()?;
 
-    //let handle = device.open()?;
+    handle.set_auto_detach_kernel_driver(true)?;
+
+    let mut buf = vec![0u8; 64];
+    let timeout = Duration::from_secs(2);
+
+    println!("about to read");
+
+    println!("claiming interface");
+    handle.claim_interface(0u8)?;
+
+    println!("reading bytes");
+    let bytes_read = handle.read_interrupt(endpoint, &mut buf, timeout)?;
+
+    println!("printing buffer");
+    println!("{:?}", buf);
 
     //let vendor_id: u16 = device.property_value("ID_VENDOR_ID").ok_or("")?.into_inner().parse::<u16>();
     //let product_id = device.property_value("ID_USB_MODEL_ID").ok_or("")?;
@@ -51,38 +105,32 @@ fn monitor_device<T: UsbContext>(device: Device<T>) -> Result<(), Box<dyn Error>
     Ok(())
 }
 
-fn is_joystick<T: rusb::UsbContext>(device: &rusb::Device<T>) -> Result<bool, Box<dyn Error>> {
-    let descriptor = device.device_descriptor()?;
+//println!("{} == {} -> {}", vid, 0x045e, vid == 0x045e);
+//println!("{:#?} == {:#?} -> {}", pid, 0x028e, pid == 0x028e);
+//println!("{}, {}", vid, pid);
+// 045e, 028e -> haute42, generic cp2040 ?
+// 0c12, 0ef8 -> junkfood snackbox micro
+fn is_joystick<T: rusb::UsbContext>(device: &rusb::Device<T>) -> bool {
+    let descriptor = match device.device_descriptor() {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
 
     let vid: u16 = descriptor.vendor_id();
     let pid: u16 = descriptor.product_id();
 
-
-    //println!("{} == {} -> {}", vid, 0x045e, vid == 0x045e);
-    //println!("{:#?} == {:#?} -> {}", pid, 0x028e, pid == 0x028e);
-    //println!("{}, {}", vid, pid);
-
     match (vid, pid) {
-        (0x045e, 0x028e) => Ok(true),
-        _ => Ok(false)
+        (0x045e, 0x028e) => true,
+        (0x0c12, 0x0ef8) => true,
+        _ => false,
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    //let hid_api = HidApi::new()?;
-    //let hid_api = hidapi_rusb::HidApi::new()?;
-    //let conn = Arc::new(Mutex::new(rusqlite::Connection::open(DB_PATH)?));
-    //let devices: HashMap<String, String> = HashMap::new();
-    //let (tx, rx) = channel::<i32>();
-
+fn rusb_test() -> Result<(), Box<dyn Error>> {
     let r_devices = rusb::devices()?;
     let devices = r_devices
         .iter()
-        .filter(|device| match is_joystick(device) {
-            Ok(true) => true,
-            _ => false,
-        });
+        .filter(|device| is_joystick(device));
 
     for device in devices {
         thread::spawn(move || {
@@ -92,63 +140,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
         });
     }
 
-    //for device in hid_api.device_list() {
-    //    println!("{:#?}", device);
-    //}
-    //println!("num devices: {}", hid_api.device_list().count());
+    Ok(())
+}
 
-    //let mut enumerator = udev::Enumerator::new().unwrap();
-    //for device in enumerator.scan_devices().unwrap() {
-    //    println!("{:#?}", device);
-    //}
-    //println!("udev devices: {}", enumerator.scan_devices().unwrap().count());
-
-    //let t1 = thread::spawn(move || {
-    //    for received in rx {
-    //        println!("received: {:#?}", received);
-    //    }
-    //});
-
-    //let mut enumerator = udev::Enumerator::new().unwrap();
-    //enumerator.match_property("ID_VENDOR_ID", "045e").unwrap();
-    //enumerator.match_property("ID_USB_MODEL_ID", "028e").unwrap();
+fn udev_scan_devices() -> Result<(), Box<dyn Error>> {
+    let mut enumerator = udev::Enumerator::new()?;
+    enumerator.match_property("ID_VENDOR_ID", "045e")?;
+    enumerator.match_property("ID_USB_MODEL_ID", "028e")?;
     //enumerator.match_attribute("power/control", "on").unwrap();
 
-    //let mut i = 0;
-    //for device in enumerator.scan_devices().unwrap() {
-    //    monitor_device(device);
-    //}
+    for device in enumerator.scan_devices()? {
+        println!("{:#?}", device);
+        println!("[properties]");
+        for property in device.properties() {
 
-    //thread::sleep(Duration::from_secs(1));
-    //std::process::exit(0);
-    //
-    // idVendor=045e, idProduct=028e
-    //let threads = vec![t1, t2];
-    //for thread in threads {
-    //    thread.join();
-    //}
+            println!("      - {:?} {:?}", property.name(), property.value());
+        }
+        println!("[attributes]");
+        for attribute in device.attributes() {
+            println!("      - {:?} {:?}", attribute.name(), attribute.value());
+        }
+    }
+
+    println!("udev devices: {}", enumerator.scan_devices()?.count());
 
     Ok(())
 }
 
-fn handle_db() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    //rusb_test();
+    //udev_scan_devices();
+
     Ok(())
 }
-
-async fn handle_device_event() {
-    println!("test");
-}
-
-
-                //i += 1;
-                //println!();
-                //println!("{:#?}", device);
-                //println!("[properties]");
-                //for property in device.properties() {
-
-                //    println!("      - {:?} {:?}", property.name(), property.value());
-                //}
-                //println!("[attributes]");
-                //for attribute in device.attributes() {
-                //    println!("      - {:?} {:?}", attribute.name(), attribute.value());
-                //}
