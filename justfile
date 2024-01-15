@@ -2,4 +2,5 @@ b:
   cargo build
 
 r:
-  cargo run
+  cargo build
+  sudo ./target/debug/fst_rs
