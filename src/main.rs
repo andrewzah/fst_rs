@@ -147,7 +147,7 @@ fn udev_scan_devices() -> Result<(), Box<dyn Error>> {
     let mut enumerator = udev::Enumerator::new()?;
     enumerator.match_property("ID_VENDOR_ID", "045e")?;
     enumerator.match_property("ID_USB_MODEL_ID", "028e")?;
-    //enumerator.match_attribute("power/control", "on").unwrap();
+    //enumerator.match_attribute("power/level", "on").unwrap();
 
     for device in enumerator.scan_devices()? {
         println!("{:#?}", device);
