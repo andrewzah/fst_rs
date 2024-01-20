@@ -3,4 +3,4 @@ b:
 
 r:
   cargo build
-  sudo ./target/debug/fst_rs
+  ./target/debug/fst_rs
