@@ -5,7 +5,5 @@ edition = "2021"
 
 [dependencies]
 evdev = { version = "0.12", features = ["tokio"] }
-rusb = "0.9"
 rusqlite = { version = "0.30", features = ["bundled"] }
 tokio = { version = "1", features = ["full"]}
-udev = "0.8"

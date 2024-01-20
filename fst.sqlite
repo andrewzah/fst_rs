@@ -1,0 +1,17 @@
+CREATE TABLE if not exists joysticks (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL
+);
+
+CREATE TABLE if not exists keypresses (
+  code INTEGER NOT NULL,
+  joystick_id INTEGER NOT NULL
+);
+
+CREATE TABLE if not exists timestamps (
+  code INTEGER NOT NULL,
+  joystick_id INTEGER NOT NULL,
+  timestamp TEXT NOT NULL
+);
+
+-- vim: set syntax=sql:

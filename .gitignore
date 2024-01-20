@@ -1,3 +1,4 @@
 keystrokes.db
+*.db
 *.log
 /target

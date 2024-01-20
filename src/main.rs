@@ -26,6 +26,7 @@ fn is_joystick(device: &evdev::Device) -> bool {
         (0x045e, 0x028e) => true,
         (0x0c12, 0x0ef8) => true,
         (0x0f0d, 0x0092) => true,
+        (0x1532, 0x0401) => true,
         _ => false,
     }
 }
