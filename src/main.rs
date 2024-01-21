@@ -4,29 +4,71 @@
 #![allow(unused_mut)]
 #![allow(unused_variables)]
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::{Arc, Mutex, mpsc::channel};
-use std::time::Duration;
-use std::thread;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
+use std::time::Duration;
+use std::time::UNIX_EPOCH;
 
-use evdev::Device;
+use evdev::{Device, EventType};
 use rusqlite::{params, Connection};
 use tokio::{task, runtime::Runtime, sync::Mutex as TokioMutex};
 
-const DB_PATH: &str = "keystrokes.db";
+const DB_PATH: &str = "fst.db";
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let conn = Connection::open(DB_PATH)?;
+    let (tx, rx) = mpsc::channel();
+
+    handle_db(conn, rx);
+
+    match evdev_test(tx.clone()).await {
+        Err(err) => println!("err: {}", err),
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn handle_db(conn: Connection, rx: mpsc::Receiver<(String, u16, String)>) -> Result<(), Box<dyn Any + Send>> {
+    let handle = thread::spawn(move || {
+        loop {
+            if let Ok(msg) = rx.recv() {
+                let (kind, code, timestamp) = msg;
+                conn.execute(
+                    "INSERT INTO timestamps (kind, code, joystick_id, timestamp) VALUES (?1, ?2, ?3, ?4)",
+                    (kind, code, 99, timestamp)
+                );
+            }
+        }
+    });
+
+    Ok(())
+}
+
 
 fn is_joystick(device: &evdev::Device) -> bool {
-    let input_id = device.input_id();
-    let vid = input_id.vendor();
-    let pid = input_id.product();
+    if let Some(sk) = device.supported_keys() {
+        if !sk.contains(evdev::Key::BTN_START) {
+            return false;
+        }
+    } else {
+        return false;
+    }
 
-    match (vid, pid) {
-        (0x045e, 0x028e) => true,
-        (0x0c12, 0x0ef8) => true,
-        (0x0f0d, 0x0092) => true,
-        (0x1532, 0x0401) => true,
+    let se = device.supported_events();
+    let has_key = se.contains(EventType::KEY);
+    let has_abs = se.contains(EventType::ABSOLUTE);
+    let has_rel = se.contains(EventType::RELATIVE);
+
+    match (has_key, has_abs, has_rel) {
+        (true, true, true) => true,
+        (true, true, false) => true,
+        (false, _, _) => false,
         _ => false,
     }
 }
@@ -39,8 +81,8 @@ fn debug_device(device: &Device) {
 
     println!("[Supported Events]\n{:?}\n", device.supported_events());
 
-    println!("[Supported Keys]");
-    for keyset in device.supported_keys() {
+    if let Some(keyset) = device.supported_keys() {
+        println!("[Supported Keys]");
         println!("{:?}", keyset);
 
         for key in keyset.iter() {
@@ -66,14 +108,16 @@ fn debug_device(device: &Device) {
             };
             println!("{}: {}", variant, key.0);
         }
+
+        println!("");
     }
 
-    println!("");
     println!("[Supported Absolute Axes]");
-    for axes_set in device.supported_absolute_axes() {
-        for axis in axes_set.iter() {
+    if let Some(abs_axes_set) = device.supported_absolute_axes() {
+        for axis in abs_axes_set.iter() {
             println!("{:?}: {}", axis, axis.0);
         }
+        println!("");
     }
 
     println!("");
@@ -82,7 +126,7 @@ fn debug_device(device: &Device) {
     println!("[Misc Properties]\n{:?}\n", device.misc_properties());
 }
 
-async fn evdev_test() -> Result<(), Box<dyn Error>> {
+async fn evdev_test(tx: mpsc::Sender<(String, u16, String)>) -> Result<(), Box<dyn Error>> {
     use evdev::{Device, Key};
     //let mut monitored_paths: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
     let mut monitored_paths: Vec<String> = vec![];
@@ -95,6 +139,8 @@ async fn evdev_test() -> Result<(), Box<dyn Error>> {
             .filter(|d| is_joystick(d));
 
         for device in devices {
+            let tx = tx.clone();
+
             match device.physical_path() {
                 Some(p) => {
                     let p_str = p.to_string();
@@ -112,7 +158,8 @@ async fn evdev_test() -> Result<(), Box<dyn Error>> {
                 println!("starting up thread");
                 let phys_path = device.physical_path().unwrap().to_string();
 
-                if let Err(err) = monitor_device(device).await {
+                let tx = tx.clone();
+                if let Err(err) = monitor_device(device, tx).await {
                     println!("err while monitoring device: {}", err);
                 }
             });
@@ -125,7 +172,7 @@ async fn evdev_test() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn monitor_device(device: evdev::Device) -> Result<(), Box<dyn Error>> {
+async fn monitor_device(device: evdev::Device, tx: mpsc::Sender<(String, u16, String)>) -> Result<(), Box<dyn Error>> {
     let mut events = device.into_event_stream()?;
     let mut timestamps: Vec<(String,String)> = vec![];
     let mut keypresses: HashMap<u16, AtomicU64> = HashMap::new();
@@ -137,27 +184,33 @@ async fn monitor_device(device: evdev::Device) -> Result<(), Box<dyn Error>> {
         }
 
         let (kind, code) = match ev.kind() {
-            evdev::InputEventKind::Key(key) => ("key", key.0),
-            evdev::InputEventKind::AbsAxis(abs_axis) => ("abs_axis", abs_axis.0),
+            evdev::InputEventKind::Key(key) => {
+                println!("key: {:?}", key);
+                (String::from("key"), key.0)
+            },
+            evdev::InputEventKind::AbsAxis(abs_axis) => {
+                println!("abs_axis: {:?}", abs_axis);
+                (String::from("abs_axis"), abs_axis.0)
+            },
             _ => continue,
         };
+        println!("{}: {}", kind, code);
 
         keypresses
             .entry(code)
             .and_modify(|counter| { counter.fetch_add(1, Ordering::Relaxed); } )
             .or_insert(AtomicU64::new(1));
 
-        println!("keypresses: {:?}", keypresses);
-        println!("{:?}", ev);
+        let formatted_timestamp = format_timestamp(ev.timestamp());
+        if let Err(e) = tx.send((kind, code, formatted_timestamp)) {
+            println!("err sending: {}", e);
+        }
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    match evdev_test().await {
-        Err(err) => println!("err: {}", err),
-        _ => {}
+fn format_timestamp(ts: std::time::SystemTime) -> String {
+    match ts.duration_since(UNIX_EPOCH) {
+        Ok(ut) => format!("{}", ut.as_millis()),
+        Err(_) => String::from("err")
     }
-
-    Ok(())
 }

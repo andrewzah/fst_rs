@@ -1,17 +1,27 @@
+-- separate out inputs by joystick type
 CREATE TABLE if not exists joysticks (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL
 );
 
-CREATE TABLE if not exists keypresses (
-  code INTEGER NOT NULL,
-  joystick_id INTEGER NOT NULL
-);
-
+-- each keypress is associated with a button,
+-- relative axis, or absolute axis, and a code.
 CREATE TABLE if not exists timestamps (
   code INTEGER NOT NULL,
+  kind TEXT NOT NULL,
   joystick_id INTEGER NOT NULL,
   timestamp TEXT NOT NULL
 );
+
+-- this may not be necessary, see
+-- https://docs.rs/evdev/latest/evdev/struct.Key.html
+-- https://docs.rs/evdev/latest/evdev/struct.AbsoluteAxisType.html
+-- https://docs.rs/evdev/latest/evdev/struct.RelativeAxisType.html
+CREATE TABLE keymappings (
+  code INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  string TEXT NOT NULL
+);
+
 
 -- vim: set syntax=sql:
