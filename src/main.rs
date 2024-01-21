@@ -84,9 +84,12 @@ fn debug_device(device: &Device) {
 
 async fn evdev_test() -> Result<(), Box<dyn Error>> {
     use evdev::{Device, Key};
+    //let mut monitored_paths: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
     let mut monitored_paths: Vec<String> = vec![];
 
     loop {
+        println!("scanning devices!");
+
         let mut devices = evdev::enumerate()
             .map(|t| t.1)
             .filter(|d| is_joystick(d));
@@ -107,6 +110,8 @@ async fn evdev_test() -> Result<(), Box<dyn Error>> {
 
             task::spawn(async move {
                 println!("starting up thread");
+                let phys_path = device.physical_path().unwrap().to_string();
+
                 if let Err(err) = monitor_device(device).await {
                     println!("err while monitoring device: {}", err);
                 }
@@ -131,9 +136,9 @@ async fn monitor_device(device: evdev::Device) -> Result<(), Box<dyn Error>> {
             continue
         }
 
-        let code = match ev.kind() {
-            evdev::InputEventKind::Key(key) => key.0,
-            evdev::InputEventKind::AbsAxis(abs_axis) => abs_axis.0,
+        let (kind, code) = match ev.kind() {
+            evdev::InputEventKind::Key(key) => ("key", key.0),
+            evdev::InputEventKind::AbsAxis(abs_axis) => ("abs_axis", abs_axis.0),
             _ => continue,
         };
 
